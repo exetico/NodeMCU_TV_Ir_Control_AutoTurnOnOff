@@ -55,3 +55,9 @@ https://www.esp8266basic.com/editor-interface.html
 
 Find inspiration here:
 https://www.instructables.com/Easiest-ESP8266-Learning-IR-Remote-Control-Via-WIF/
+
+IR codes:
+http://www.righto.com/2009/08/multi-protocol-infrared-remote-library.html
+
+Arduino IR Remote:
+https://github.com/Arduino-IRremote/Arduino-IRremote

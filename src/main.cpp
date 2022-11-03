@@ -9,6 +9,8 @@
 #include <IRrecv.h>
 #include <IRutils.h>
 
+#define Samsung2Power  E0E040BF // hex calue 32 ... Use E0E040BF
+
 // IR
 const uint16_t kIrLed = 4;   // D7 = GPIO 13 .... // D3 = 0 ... // D5 = 14 // D4=2 ... D2 = GPIO4
 const uint16_t kRecvPin = 5; // D8 = GPIO 15 .... // D4 = 2 ... // D6 = 12 ... D1=5
@@ -473,6 +475,14 @@ void loop()
       delay(1000);
       irsend.sendSony(0xa90, 12, 2); // 12 bits & 2 repeats
       delay(1000);
+    }
+
+
+    if (command.indexOf("3") == (0))
+    {
+      Serial.println("!!!3");
+      irsend.sendRaw(rawData, 67, 38); // Send a raw data capture at 38kHz.
+      irsend.sendSamsungAC(samsungState);
     }
   }
 
