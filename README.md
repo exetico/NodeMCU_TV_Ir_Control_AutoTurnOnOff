@@ -61,3 +61,6 @@ http://www.righto.com/2009/08/multi-protocol-infrared-remote-library.html
 
 Arduino IR Remote:
 https://github.com/Arduino-IRremote/Arduino-IRremote
+
+More:
+https://github.com/Arduino-IRremote/Arduino-IRremote/blob/master/examples/SendAndReceive/SendAndReceive.ino#L167-L170
