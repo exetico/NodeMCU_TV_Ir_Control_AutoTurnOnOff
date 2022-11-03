@@ -16,3 +16,7 @@ Cause we're using the `wm.getWebPortalActive()` function.
 ### IR Control
 
 https://github.com/crankyoldgit/IRremoteESP8266/tree/master/examples
+
+### Using the proper GPIO PINS
+
+https://www.esp8266.com/viewtopic.php?p=90383#p90383

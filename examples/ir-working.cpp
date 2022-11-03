@@ -10,13 +10,14 @@
 #include <IRutils.h>
 
 // IR
-const uint16_t kIrLed = 13;   // D7 = GPIO 13 .... // D3 = 0
-const uint16_t kRecvPin = 15; // D8 = GPIO 15 .... // D4 = 2
+const uint16_t kIrLed = 13; // D7 = GPIO 13
+const uint16_t kRecvPin = 15; // D8 = GPIO 15
 
 IRsend irsend(kIrLed);
 IRrecv irrecv(kRecvPin);
 
 decode_results results;
+
 
 // VARS
 //-- WIFI
@@ -261,15 +262,29 @@ void setup()
 
   Serial.println("Starter op..");
 
-  // Setup IR
   irsend.begin();
-  irrecv.enableIRIn(); // Start the receiver
+
+  #if ESP8266
+    Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
+  #else  // ESP8266
+    Serial.begin(115200, SERIAL_8N1);
+  #endif // ESP8266
+
+  Serial.begin(115200);
+  irrecv.enableIRIn();  // Start the receiver
+  while (!Serial)  // Wait for the serial connection to be establised.
+    delay(50);
+  Serial.println();
+  Serial.print("IRrecvDemo is now running and waiting for IR message on Pin ");
+  Serial.println(kRecvPin);
+
+  /*
 
   // Txt
   Serial.println("Starter op..");
 
   // Use internal LED
-  pinMode(D4, OUTPUT);
+  pinMode(D4, OUTPUT); 
 
   // Buttons
   button.setDebounceTime(50); // set debounce time to 50 milliseconds
@@ -277,6 +292,7 @@ void setup()
 
   // put your setup code here, to run once:
   Serial.begin(115200);
+
 
   // WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
   // it is a good practice to make sure your code sets wifi mode how you want it.
@@ -330,6 +346,8 @@ void setup()
   {
     Serial.println("Configuration portal running");
   }
+
+  */
 }
 
 // Delays
@@ -373,8 +391,48 @@ uint8_t samsungState[kSamsungAcStateLength] = {
     0x02, 0x92, 0x0F, 0x00, 0x00, 0x00, 0xF0,
     0x01, 0xE2, 0xFE, 0x71, 0x40, 0x11, 0xF0};
 
-String command;
+// Samsung Turn Off/On = DF7BB480
+
+
+  static unsigned long atime2, btime2, ctime2;
 void loop()
+{
+  if (delay_without_delaying(btime2, 100))
+  {
+      // Every 100
+      if (irrecv.decode(&results)) {
+        // print() & println() can't handle printing long longs. (uint64_t)
+        serialPrintUint64(results.value, HEX);
+        Serial.println("");
+        irrecv.resume();  // Receive the next value
+      }
+  }
+
+
+  if (delay_without_delaying(ctime2, 5000))
+  {
+    // Every 2 sec
+    // Serial.println("NEC");
+    // irsend.sendNEC(0x00FFE01FUL);
+    // delay(1000);
+    // Serial.println("Sony");
+    // irsend.sendSony(0xa90, 12, 2); // 12 bits & 2 repeats
+    // delay(1000);
+    Serial.println("a rawData capture from IRrecvDumpV2");
+    irsend.sendRaw(rawData, 67, 38); // Send a raw data capture at 38kHz.
+    delay(1000);
+    Serial.println("a Samsung A/C state from IRrecvDumpV2");
+    irsend.sendSamsungAC(samsungState);
+    delay(1000);
+  }
+
+
+  
+
+}
+
+String command;
+void loop2()
 {
 
   // Read serial
@@ -488,10 +546,6 @@ void loop()
 
     case 4:
       Serial.println("Case 4, woop");
-      Serial.println("a rawData capture from IRrecvDumpV2");
-      irsend.sendRaw(rawData, 67, 38); // Send a raw data capture at 38kHz.
-      Serial.println("a Samsung A/C state from IRrecvDumpV2");
-      irsend.sendSamsungAC(samsungState);
       break;
 
     case 5:
@@ -509,21 +563,10 @@ void loop()
   }
 
   // Loop, different timeperiods
-  static unsigned long buttonCount = 0;
+  static unsigned long ledtime = 0;
   static unsigned long atime, btime, ctime;
 
-  if (delay_without_delaying(btime, 100))
-  {
-    // Every 100
-    if (irrecv.decode(&results)) {
-      // print() & println() can't handle printing long longs. (uint64_t)
-      serialPrintUint64(results.value, HEX);
-      Serial.println("");
-      irrecv.resume();  // Receive the next value
-    }
-  }
-
-  if (delay_without_delaying(buttonCount, 500))
+  if (delay_without_delaying(ledtime, 500))
   {
     // Check if button press has been too long time ago
     unsigned long currentButtonmillis = millis();
@@ -552,9 +595,12 @@ void loop()
     // Check every sec
     checkOneSecInterval();
   }
-
+  if (delay_without_delaying(btime, 5000))
+  {
+    // Nothing right now - Serial.print("B");
+  }
   if (delay_without_delaying(ctime, 500))
   {
-    // Nothing
+    // Nothing right now - Serial.print("C");
   }
 }
