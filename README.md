@@ -13,4 +13,6 @@ Cause we're using the `wm.getWebPortalActive()` function.
 
 ### Reference
 
-N/A
+### IR Control
+
+https://github.com/crankyoldgit/IRremoteESP8266/tree/master/examples
