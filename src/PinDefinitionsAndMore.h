@@ -30,7 +30,7 @@
 #define FEEDBACK_LED_IS_ACTIVE_LOW // The LED on my board (D4) is active LOW
 #define IR_RECEIVE_PIN          5 // D1  = GPIO 5
 #define IR_SEND_PIN             4 // D2 = GPIO4 is internal LED
-#define _IR_TIMING_TEST_PIN     13 // D7
+#define _IR_TIMING_TEST_PIN     12 // D6
 #define APPLICATION_PIN          0 // D3
 
 #define tone(...) void()      // tone() inhibits receive timer
