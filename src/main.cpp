@@ -12,10 +12,10 @@
 bool __WIFI_CONNECTED = false;
 
 //-- IR COMMANDS
-uint16_t sAddress = 0x707;
-uint8_t sCommandTurnOff = 0x98; // Turn Off
-uint8_t sCommandTurnOn = 0x99; // Turn On
-uint8_t sRepeats = 10;
+uint16_t __IR_ADDRESS = 0x707;
+uint8_t __IR_COMMAND_TURN_OFF = 0x98; // Turn Off
+uint8_t __IR_COMMAND_TURN_ON = 0x99;  // Turn On
+uint8_t __IR_REPEATS = 10;
 
 //-- CONFIG
 bool fetching_config = false;
@@ -88,6 +88,16 @@ void log_i(const String &txt, int configInt)
   Serial.print(txt + " ");
   Serial.print(String(configInt));
   Serial.println(" ");
+}
+
+int digitalReadOutputPin(uint8_t pin)
+{
+  uint8_t bit = digitalPinToBitMask(pin);
+  uint8_t port = digitalPinToPort(pin);
+  if (port == NOT_A_PIN)
+    return LOW;
+
+  return (*portOutputRegister(port) & bit) ? HIGH : LOW;
 }
 
 bool fetch_json_config(void)
@@ -182,14 +192,13 @@ void controlTvState(boolean turnTvOn)
   {
     __TV_IS_ON = 0;
     Serial.println("Turning tv off");
-    IrSender.sendSamsung(sAddress, sCommandTurnOff, sRepeats);
-    
+    IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
   }
   else if (turnTvOn)
   {
     __TV_IS_ON = 1;
     Serial.println("Turning tv on");
-    IrSender.sendSamsung(sAddress, sCommandTurnOn, sRepeats);
+    IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
   }
 }
 
@@ -217,22 +226,25 @@ void checkTvState()
     controlTvState(1);
   }
   else
-  { // I'm not sure... BUt something
-
-    Serial.println("I'm not sure");
+  {
+    // Should mean that nothing should be done
+    Serial.println("All good, nothing to do");
   }
 }
 
-void blinkESP12Led(int delayMs, int loopAmount)
+void blinkESP8266Led(int delayMs, int loopAmount)
 {
- while(loopAmount > 0 ) 
-{
-  digitalWrite(D4, LOW);
-  delay(delayMs);
-  digitalWrite(D4, HIGH);
-  delay(delayMs);
- loopAmount = loopAmount -1;
- }
+  while (loopAmount > 0)
+  {
+    digitalWrite(D4, LOW);
+    delay(delayMs);
+    digitalWrite(D4, HIGH);
+    if (loopAmount > 1)
+    {
+      delay(delayMs);
+    }
+    loopAmount = loopAmount - 1;
+  }
 }
 
 void checkOneSecInterval()
@@ -245,7 +257,7 @@ void setup()
 {
   // LED on ESP8266 chip
   pinMode(D4, OUTPUT);
-  
+
   Serial.begin(115200);
 
   while (!Serial) // Wait for the serial connection to be establised.
@@ -257,7 +269,6 @@ void setup()
   Serial.println(F("START " __FILE__ " from " __DATE__ "\r\nUsing library version " VERSION_IRREMOTE));
   IrSender.begin(DISABLE_LED_FEEDBACK); // Start with IR_SEND_PIN as send pin and disable feedback LED at default feedback LED pin
   Serial.println(IR_SEND_PIN);
-
 
   // Txt
   Serial.println("Starter op..");
@@ -303,7 +314,7 @@ void setup()
     Serial.println("Connected...Wuhu :)");
 
     // Blink LED
-    blinkESP12Led(300, 6);
+    blinkESP8266Led(300, 6);
 
     Serial.println("Calling timeClient");
     timeClient.begin();
@@ -315,6 +326,7 @@ void setup()
     if (__C_TURN_ON_HH && __C_TURN_OFF_HH)
     {
       Serial.println("Download OK");
+      blinkESP8266Led(200, 6);
     }
     Serial.println("Download end");
 
@@ -391,24 +403,23 @@ void loop()
     if (command.indexOf("1") == (0))
     {
       Serial.println("!!!1");
-      IrSender.sendSamsung(sAddress, sCommandTurnOff, sRepeats);
+      IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
       delay(1000);
     }
 
     if (command.indexOf("2") == (0))
     {
       Serial.println("!!!2");
-      IrSender.sendSamsung(sAddress, sCommandTurnOn, sRepeats);
+      IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
       delay(1000);
     }
-
 
     if (command.indexOf("3") == (0))
     {
       Serial.println("!!!3");
-      IrSender.sendSamsung(sAddress, sCommandTurnOff, sRepeats);
+      IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
       delay(1000);
-      IrSender.sendSamsung(sAddress, sCommandTurnOn, sRepeats);
+      IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
       delay(1000);
     }
   }
@@ -430,12 +441,14 @@ void loop()
   {
     Serial.println("The button is pressed");
     buttonIsPressed = 1;
+    digitalWrite(D4, LOW);
   }
 
   if (button.isReleased())
   {
     Serial.println("The button is released");
     buttonIsPressed = 0;
+    digitalWrite(D4, HIGH);
   }
 
   // If no wifi, skip the rest...
@@ -469,51 +482,10 @@ void loop()
   {
     Serial.println(count);
 
-    int countIn6 = count % 6 + 1;
-
     // If button has not been pressed before
-    if(!buttonPressedBefore){
-      lastButtonPressMillis = millis();
-    }
-
-    switch (countIn6)
+    if (!buttonPressedBefore)
     {
-    case 1:
-      Serial.println("Case 1, N/A");
-      break;
-
-    case 2:
-      if(millis() > lastButtonPressMillis + 1000){
-        Serial.println("Case 2, N/A");
-      }
-      break;
-
-    case 3:
-      Serial.println("Case 3, sCommandTurnOff");
-      blinkESP12Led(400, 3);
-      IrSender.sendSamsung(sAddress, sCommandTurnOff, sRepeats);
-      break;
-
-    case 4:
-      Serial.println("Case 4, sCommandTurnOn");
-      blinkESP12Led(200, 6);
-      IrSender.sendSamsung(sAddress, sCommandTurnOn, sRepeats);
-      break;
-
-    case 5:
-      Serial.println("Case 5, checkOneSecInterval");
-      checkOneSecInterval();
-      break;
-
-    case 6:
-      Serial.println("Case 6, __TV_IS_ON");
-      __TV_IS_ON = !__TV_IS_ON;
-      if(__TV_IS_ON){
-        blinkESP12Led(200, 6);
-      }else{
-        blinkESP12Led(200, 6);
-      }
-      break;
+      lastButtonPressMillis = millis();
     }
 
     previousButtonPressMillis = lastButtonPressMillis;
@@ -530,11 +502,82 @@ void loop()
   {
     // Check if button press has been too long time ago
     unsigned long currentButtonmillis = millis();
-    if (button.getCount() > 0 && currentButtonmillis - lastButtonPressMillis >= lastButtonTriggerLongPressMillis)
+    count = button.getCount();
+    if (count > 0 && currentButtonmillis - lastButtonPressMillis >= lastButtonTriggerLongPressMillis)
     {
+      Serial.println("Long-press millis triggered - Now running through cases with switch");
+
+      // Check the count
+      switch (count)
+      {
+      case 1:
+        Serial.println("Case 1, Toogle LED");
+        int state;
+        state = digitalReadOutputPin(D4);
+        if (state)
+        {
+          digitalWrite(D4, LOW);
+        }
+        else
+        {
+          digitalWrite(D4, HIGH);
+        }
+
+        break;
+
+      case 2:
+        if (millis() > lastButtonPressMillis + 1000)
+        {
+          Serial.println("Case 2, Get state");
+          if (__TV_IS_ON)
+          {
+            blinkESP8266Led(150, 1);
+          }
+          else
+          {
+            blinkESP8266Led(400, 1);
+          }
+        }
+        break;
+
+      case 3:
+        Serial.println("Case 3, __IR_COMMAND_TURN_OFF");
+        blinkESP8266Led(2000, 1);
+        blinkESP8266Led(400, 3);
+        IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
+        break;
+
+      case 4:
+        Serial.println("Case 4, __IR_COMMAND_TURN_ON");
+        blinkESP8266Led(2000, 1);
+        blinkESP8266Led(150, 8);
+        IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
+        break;
+
+      case 5:
+        Serial.println("Case 5, checkOneSecInterval");
+        checkOneSecInterval();
+        break;
+
+      case 6:
+        Serial.println("Case 6, __TV_IS_ON");
+        __TV_IS_ON = !__TV_IS_ON;
+        if (__TV_IS_ON)
+        {
+          blinkESP8266Led(150, 8);
+          IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
+        }
+        else
+        {
+          blinkESP8266Led(400, 3);
+          IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
+        }
+        break;
+      }
+
       // Reset count
       button.resetCount();
-      Serial.print("Reset Button Count");
+      Serial.println("Reset Button Count - And running through switch-cases");
 
       // Set state of longpress button
       if (buttonIsPressed)
