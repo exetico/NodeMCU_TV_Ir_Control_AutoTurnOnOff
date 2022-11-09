@@ -3,28 +3,19 @@
 #include <WiFiUdp.h>
 #include <ezButton.h>
 
-// PIN CONFIGURATION
-#include <IRremoteESP8266.h>
-#include <IRsend.h>
-#include <IRrecv.h>
-#include <IRutils.h>
-
-#define Samsung2Power  E0E040BF // hex calue 32 ... Use E0E040BF
-
-// IR
-const uint16_t kIrLed = 4;   // D7 = GPIO 13 .... // D3 = 0 ... // D5 = 14 // D4=2 ... D2 = GPIO4
-const uint16_t kRecvPin = 5; // D8 = GPIO 15 .... // D4 = 2 ... // D6 = 12 ... D1=5
-// If D7+D8 is in use, we cannot upload
-// GPIO 6+7 is used internally
-
-IRsend irsend(kIrLed);
-IRrecv irrecv(kRecvPin);
-
-decode_results results;
+// IR Configuration
+#include "PinDefinitionsAndMore.h" // Define macros for input and output pin etc.
+#include <IRremote.hpp>
 
 // VARS
 //-- WIFI
 bool __WIFI_CONNECTED = false;
+
+//-- IR COMMANDS
+uint16_t sAddress = 0x707;
+uint8_t sCommandTurnOff = 0x98; // Turn Off
+uint8_t sCommandTurnOn = 0x99; // Turn On
+uint8_t sRepeats = 10;
 
 //-- CONFIG
 bool fetching_config = false;
@@ -61,6 +52,8 @@ unsigned long buttonIsPressed = 0;
 
 unsigned long lastButtonTriggerLongPressMillis = 3000;
 unsigned long lastButtonPressMillis = millis();
+unsigned long previousButtonPressMillis = millis();
+bool buttonPressedBefore = 0;
 unsigned long lastButtonPressWasLongPress = 0;
 
 // Time
@@ -189,11 +182,14 @@ void controlTvState(boolean turnTvOn)
   {
     __TV_IS_ON = 0;
     Serial.println("Turning tv off");
+    IrSender.sendSamsung(sAddress, sCommandTurnOff, sRepeats);
+    
   }
   else if (turnTvOn)
   {
     __TV_IS_ON = 1;
     Serial.println("Turning tv on");
+    IrSender.sendSamsung(sAddress, sCommandTurnOn, sRepeats);
   }
 }
 
@@ -227,31 +223,16 @@ void checkTvState()
   }
 }
 
-void blinkESP12Led()
+void blinkESP12Led(int delayMs, int loopAmount)
+{
+ while(loopAmount > 0 ) 
 {
   digitalWrite(D4, LOW);
-  delay(300);
+  delay(delayMs);
   digitalWrite(D4, HIGH);
-  delay(300);
-  digitalWrite(D4, LOW);
-  delay(300);
-  digitalWrite(D4, HIGH);
-  delay(300);
-  digitalWrite(D4, LOW);
-  delay(300);
-  digitalWrite(D4, HIGH);
-  delay(300);
-  digitalWrite(D4, LOW);
-  delay(300);
-  digitalWrite(D4, HIGH);
-  delay(300);
-  digitalWrite(D4, LOW);
-  delay(300);
-  digitalWrite(D4, HIGH);
-  delay(300);
-  digitalWrite(D4, LOW);
-  delay(300);
-  digitalWrite(D4, HIGH);
+  delay(delayMs);
+ loopAmount = loopAmount -1;
+ }
 }
 
 void checkOneSecInterval()
@@ -262,24 +243,21 @@ void checkOneSecInterval()
 // SETUP
 void setup()
 {
+  // LED on ESP8266 chip
+  pinMode(D4, OUTPUT);
+  
+  Serial.begin(115200);
+
+  while (!Serial) // Wait for the serial connection to be establised.
+    delay(50);
 
   Serial.println("Starter op..");
 
-  irsend.begin();
+  // IR Init
+  Serial.println(F("START " __FILE__ " from " __DATE__ "\r\nUsing library version " VERSION_IRREMOTE));
+  IrSender.begin(DISABLE_LED_FEEDBACK); // Start with IR_SEND_PIN as send pin and disable feedback LED at default feedback LED pin
+  Serial.println(IR_SEND_PIN);
 
-#if ESP8266
-  Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
-#else  // ESP8266
-  Serial.begin(115200, SERIAL_8N1);
-#endif // ESP8266
-
-  Serial.begin(115200);
-  irrecv.enableIRIn(); // Start the receiver
-  while (!Serial)      // Wait for the serial connection to be establised.
-    delay(50);
-  Serial.println();
-  Serial.print("IRrecvDemo is now running and waiting for IR message on Pin ");
-  Serial.println(kRecvPin);
 
   // Txt
   Serial.println("Starter op..");
@@ -325,7 +303,7 @@ void setup()
     Serial.println("Connected...Wuhu :)");
 
     // Blink LED
-    blinkESP12Led();
+    blinkESP12Led(300, 6);
 
     Serial.println("Calling timeClient");
     timeClient.begin();
@@ -376,53 +354,6 @@ boolean delay_without_delaying(unsigned long &since, unsigned long time)
   return false;
 }
 
-// Example of data captured by IRrecvDumpV2.ino
-uint16_t rawData[67] = {9000, 4500, 650, 550, 650, 1650, 600, 550, 650, 550,
-                        600, 1650, 650, 550, 600, 1650, 650, 1650, 650, 1650,
-                        600, 550, 650, 1650, 650, 1650, 650, 550, 600, 1650,
-                        650, 1650, 650, 550, 650, 550, 650, 1650, 650, 550,
-                        650, 550, 650, 550, 600, 550, 650, 550, 650, 550,
-                        650, 1650, 600, 550, 650, 1650, 650, 1650, 650, 1650,
-                        650, 1650, 650, 1650, 650, 1650, 600};
-// Example Samsung A/C state captured from IRrecvDumpV2.ino
-uint8_t samsungState[kSamsungAcStateLength] = {
-    0x02, 0x92, 0x0F, 0x00, 0x00, 0x00, 0xF0,
-    0x01, 0xE2, 0xFE, 0x71, 0x40, 0x11, 0xF0};
-
-// Samsung Turn Off/On = DF7BB480
-
-static unsigned long atime2, btime2, ctime2;
-void loop2()
-{
-  if (delay_without_delaying(btime2, 100))
-  {
-    // Every 100
-    if (irrecv.decode(&results))
-    {
-      // print() & println() can't handle printing long longs. (uint64_t)
-      serialPrintUint64(results.value, DEC); // HEX or DEV
-      Serial.println("");
-      irrecv.resume(); // Receive the next value
-    }
-  }
-
-  if (delay_without_delaying(ctime2, 5000))
-  {
-    // Every 2 sec
-    // Serial.println("NEC");
-    // irsend.sendNEC(0x00FFE01FUL);
-    // delay(1000);
-    // Serial.println("Sony");
-    // irsend.sendSony(0xa90, 12, 2); // 12 bits & 2 repeats
-    // delay(1000);
-    Serial.println("a rawData capture from IRrecvDumpV2");
-    irsend.sendRaw(rawData, 67, 38); // Send a raw data capture at 38kHz.
-    delay(1000);
-    Serial.println("a Samsung A/C state from IRrecvDumpV2");
-    irsend.sendSamsungAC(samsungState);
-  }
-}
-
 String command;
 void loop()
 {
@@ -435,10 +366,6 @@ void loop()
     Serial.printf("Command received %s \n", command.c_str());
 
     char *commandStr = const_cast<char *>(command.c_str());
-
-    // Serial.println(strtok(commandStr, "bob"));
-    // Serial.println(command.indexOf("bob"));
-    // Serial.println(command.equals("bob"));
 
     if (command.indexOf("sn") == (0))
     {
@@ -464,16 +391,14 @@ void loop()
     if (command.indexOf("1") == (0))
     {
       Serial.println("!!!1");
-      irsend.sendRaw(rawData, 67, 38); // Send a raw data capture at 38kHz.
-      irsend.sendSamsungAC(samsungState);
+      IrSender.sendSamsung(sAddress, sCommandTurnOff, sRepeats);
+      delay(1000);
     }
 
     if (command.indexOf("2") == (0))
     {
       Serial.println("!!!2");
-      irsend.sendNEC(0x00FFE01FUL);
-      delay(1000);
-      irsend.sendSony(0xa90, 12, 2); // 12 bits & 2 repeats
+      IrSender.sendSamsung(sAddress, sCommandTurnOn, sRepeats);
       delay(1000);
     }
 
@@ -481,8 +406,10 @@ void loop()
     if (command.indexOf("3") == (0))
     {
       Serial.println("!!!3");
-      irsend.sendRaw(rawData, 67, 38); // Send a raw data capture at 38kHz.
-      irsend.sendSamsungAC(samsungState);
+      IrSender.sendSamsung(sAddress, sCommandTurnOff, sRepeats);
+      delay(1000);
+      IrSender.sendSamsung(sAddress, sCommandTurnOn, sRepeats);
+      delay(1000);
     }
   }
 
@@ -544,36 +471,53 @@ void loop()
 
     int countIn6 = count % 6 + 1;
 
-    lastButtonPressMillis = millis();
+    // If button has not been pressed before
+    if(!buttonPressedBefore){
+      lastButtonPressMillis = millis();
+    }
 
     switch (countIn6)
     {
     case 1:
-      Serial.println("Case 1, woop");
+      Serial.println("Case 1, N/A");
       break;
 
     case 2:
-      Serial.println("Case 2, woop");
+      if(millis() > lastButtonPressMillis + 1000){
+        Serial.println("Case 2, N/A");
+      }
       break;
 
     case 3:
-      Serial.println("Case 3, woop");
+      Serial.println("Case 3, sCommandTurnOff");
+      blinkESP12Led(400, 3);
+      IrSender.sendSamsung(sAddress, sCommandTurnOff, sRepeats);
       break;
 
     case 4:
-      Serial.println("Case 4, woop");
+      Serial.println("Case 4, sCommandTurnOn");
+      blinkESP12Led(200, 6);
+      IrSender.sendSamsung(sAddress, sCommandTurnOn, sRepeats);
       break;
 
     case 5:
-      Serial.println("Case 5, woop");
+      Serial.println("Case 5, checkOneSecInterval");
       checkOneSecInterval();
       break;
 
     case 6:
-      Serial.println("Case 6, woop");
+      Serial.println("Case 6, __TV_IS_ON");
       __TV_IS_ON = !__TV_IS_ON;
+      if(__TV_IS_ON){
+        blinkESP12Led(200, 6);
+      }else{
+        blinkESP12Led(200, 6);
+      }
       break;
     }
+
+    previousButtonPressMillis = lastButtonPressMillis;
+    lastButtonPressMillis = millis();
 
     lastCount = count;
   }
@@ -610,16 +554,6 @@ void loop()
 
     // Check every sec
     checkOneSecInterval();
-
-    // IR Recieve
-    // Every 100
-    if (irrecv.decode(&results))
-    {
-      // print() & println() can't handle printing long longs. (uint64_t)
-      serialPrintUint64(results.value, HEX); // HEX or DEV
-      Serial.println("");
-      irrecv.resume(); // Receive the next value
-    }
   }
   if (delay_without_delaying(btime, 5000))
   {
