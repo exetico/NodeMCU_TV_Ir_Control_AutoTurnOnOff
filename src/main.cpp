@@ -19,9 +19,10 @@ uint8_t __IR_REPEATS = 10;
 
 //-- CONFIG
 bool fetching_config = false;
-
+bool __SHOW_POWER_STATE = false;
+bool __CURRENT_STATE_LED = 0;
 //-- TV STATE
-bool __TV_IS_ON = 0;
+bool __TV_IS_ON = false;
 // int __TV_TRIGGER_EPOCH_NEXT = 0;
 // int __TV_TRIGGER_EPOCH_PREVIOUS = 0;
 
@@ -45,7 +46,7 @@ int __TIME_EPOCH = 0;
 String __TIME_FORMATTED = "";
 
 //-- BUTTONS
-ezButton button(13); // GPIO4 = D2 // OBS
+ezButton button(0); // GPIO4 = D2 // OBS .... // GPIO 13 = D7 .... GPIO 0 = Build in "Flash button" on NodeMCU
 unsigned long lastCount = 0;
 unsigned long count = 0;
 unsigned long buttonIsPressed = 0;
@@ -98,6 +99,45 @@ int digitalReadOutputPin(uint8_t pin)
     return LOW;
 
   return (*portOutputRegister(port) & bit) ? HIGH : LOW;
+}
+
+void turnOnLED(bool turnOn, bool returnToPowerState = 0, int delayInt = 500){
+  //   int state;
+  //   state = digitalReadOutputPin(D4);
+  // turnOnLED(false, 1);
+  if(turnOn){
+   digitalWrite(D4, __SHOW_POWER_STATE); 
+  }else{
+    digitalWrite(D4, !__SHOW_POWER_STATE);
+  }
+
+  // Return to power state LED
+  if(returnToPowerState){
+    delay(delayInt);
+    if(__SHOW_POWER_STATE){
+      digitalWrite(D4, LOW);
+    }else{
+      digitalWrite(D4, HIGH);
+    }
+  }
+}
+
+void blinkESP8266LED(int delayMs, int loopAmount)
+{
+  while (loopAmount > 0)
+  {
+
+    turnOnLED(true);
+    delay(delayMs);
+    turnOnLED(false);
+    if (loopAmount > 1)
+    {
+      delay(delayMs);
+    }
+    loopAmount = loopAmount - 1;
+  }
+
+  turnOnLED(false, 1); // Return to previous state
 }
 
 bool fetch_json_config(void)
@@ -192,12 +232,14 @@ void controlTvState(boolean turnTvOn)
   {
     __TV_IS_ON = 0;
     Serial.println("Turning tv off");
+    blinkESP8266LED(600, 3);
     IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
   }
   else if (turnTvOn)
   {
     __TV_IS_ON = 1;
     Serial.println("Turning tv on");
+    blinkESP8266LED(150, 5);
     IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
   }
 }
@@ -232,20 +274,6 @@ void checkTvState()
   }
 }
 
-void blinkESP8266Led(int delayMs, int loopAmount)
-{
-  while (loopAmount > 0)
-  {
-    digitalWrite(D4, LOW);
-    delay(delayMs);
-    digitalWrite(D4, HIGH);
-    if (loopAmount > 1)
-    {
-      delay(delayMs);
-    }
-    loopAmount = loopAmount - 1;
-  }
-}
 
 void checkOneSecInterval()
 {
@@ -255,7 +283,7 @@ void checkOneSecInterval()
 // SETUP
 void setup()
 {
-  // LED on ESP8266 chip
+  // LED on ESP8266 chip (internal LED)
   pinMode(D4, OUTPUT);
 
   Serial.begin(115200);
@@ -265,6 +293,9 @@ void setup()
 
   Serial.println("Starter op..");
 
+  // Set Current state LED
+  __CURRENT_STATE_LED = digitalReadOutputPin(D4);
+
   // IR Init
   Serial.println(F("START " __FILE__ " from " __DATE__ "\r\nUsing library version " VERSION_IRREMOTE));
   IrSender.begin(DISABLE_LED_FEEDBACK); // Start with IR_SEND_PIN as send pin and disable feedback LED at default feedback LED pin
@@ -272,9 +303,6 @@ void setup()
 
   // Txt
   Serial.println("Starter op..");
-
-  // Use internal LED
-  pinMode(D4, OUTPUT);
 
   // Buttons
   button.setDebounceTime(50); // set debounce time to 50 milliseconds
@@ -314,7 +342,7 @@ void setup()
     Serial.println("Connected...Wuhu :)");
 
     // Blink LED
-    blinkESP8266Led(300, 6);
+    blinkESP8266LED(300, 6);
 
     Serial.println("Calling timeClient");
     timeClient.begin();
@@ -326,7 +354,7 @@ void setup()
     if (__C_TURN_ON_HH && __C_TURN_OFF_HH)
     {
       Serial.println("Download OK");
-      blinkESP8266Led(200, 6);
+      blinkESP8266LED(200, 6);
     }
     Serial.println("Download end");
 
@@ -441,14 +469,14 @@ void loop()
   {
     Serial.println("The button is pressed");
     buttonIsPressed = 1;
-    digitalWrite(D4, LOW);
+    turnOnLED(!digitalReadOutputPin(D4));
   }
 
   if (button.isReleased())
   {
     Serial.println("The button is released");
     buttonIsPressed = 0;
-    digitalWrite(D4, HIGH);
+    turnOnLED(!digitalReadOutputPin(D4));
   }
 
   // If no wifi, skip the rest...
@@ -511,17 +539,10 @@ void loop()
       switch (count)
       {
       case 1:
+        __SHOW_POWER_STATE = !__SHOW_POWER_STATE;
+
         Serial.println("Case 1, Toogle LED");
-        int state;
-        state = digitalReadOutputPin(D4);
-        if (state)
-        {
-          digitalWrite(D4, LOW);
-        }
-        else
-        {
-          digitalWrite(D4, HIGH);
-        }
+        turnOnLED(true, true, 100);
 
         break;
 
@@ -531,26 +552,24 @@ void loop()
           Serial.println("Case 2, Get state");
           if (__TV_IS_ON)
           {
-            blinkESP8266Led(150, 1);
+            blinkESP8266LED(150, 5);
           }
           else
           {
-            blinkESP8266Led(400, 1);
+            blinkESP8266LED(600, 3);
           }
         }
         break;
 
       case 3:
         Serial.println("Case 3, __IR_COMMAND_TURN_OFF");
-        blinkESP8266Led(2000, 1);
-        blinkESP8266Led(400, 3);
+        blinkESP8266LED(600, 4);
         IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
         break;
 
       case 4:
         Serial.println("Case 4, __IR_COMMAND_TURN_ON");
-        blinkESP8266Led(2000, 1);
-        blinkESP8266Led(150, 8);
+        blinkESP8266LED(150, 9);
         IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
         break;
 
@@ -564,12 +583,12 @@ void loop()
         __TV_IS_ON = !__TV_IS_ON;
         if (__TV_IS_ON)
         {
-          blinkESP8266Led(150, 8);
+          blinkESP8266LED(150, 8);
           IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
         }
         else
         {
-          blinkESP8266Led(400, 3);
+          blinkESP8266LED(600, 3);
           IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
         }
         break;
