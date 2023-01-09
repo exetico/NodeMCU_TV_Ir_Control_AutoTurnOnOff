@@ -7,6 +7,10 @@
 #include "PinDefinitionsAndMore.h" // Define macros for input and output pin etc.
 #include <IRremote.hpp>
 
+// Prevent Stack crashed for network-requests - See https://github.com/esp8266/Arduino/issues/6811
+#include <StackThunk.h>
+#define _stackSize (6900/4)
+
 // VARS
 //-- WIFI
 bool __WIFI_CONNECTED = false;
@@ -23,8 +27,12 @@ bool __SHOW_POWER_STATE = false;
 bool __CURRENT_STATE_LED = 0;
 //-- TV STATE
 bool __TV_IS_ON = false;
+bool __BLUE_DIMMED = false;
 // int __TV_TRIGGER_EPOCH_NEXT = 0;
 // int __TV_TRIGGER_EPOCH_PREVIOUS = 0;
+
+//-- TMP
+bool __DOWNLOAD_CONFIG_OK = false;
 
 int __TV_ON_SEC = 0;
 int __TV_OFF_SEC = 0;
@@ -36,14 +44,26 @@ int __C_TURN_ON_SS = 30;
 int __C_TURN_OFF_HH = 16;
 int __C_TURN_OFF_MM = 30;
 int __C_TURN_OFF_SS = 30;
+//const char* __C_ALLOWED_DAYS = "None";
+//String __C_ALLOWED_DAYS = String("None");
+//char*  __C_ALLOWED_DAYS = (char*)"";
+const char* __C_ALLOWED_DAYS = "";
 
 //-- TIME
 int __THIS_TIME = 0;
 int __TIME_HH = 0;
 int __TIME_MM = 0;
 int __TIME_SS = 0;
+int __TIME_WEEKDAY = 0;
 int __TIME_EPOCH = 0;
 String __TIME_FORMATTED = "";
+
+//-- RGB Strips
+#include "Color.h"
+const int redLED = 2;   // D4 GPIO2   ...  D4 = GPIO2   .... GPIO0 = D3 BUT THAT'S USED FOR BUILD IN FLASH BUTTON!
+const int greenLED = 14; // D5 GPIO14
+const int blueLED = 12; // D6 GPIO12
+Color createColor(redLED, greenLED, blueLED);
 
 //-- BUTTONS
 ezButton button(0); // GPIO4 = D2 // OBS .... // GPIO 13 = D7 .... GPIO 0 = Build in "Flash button" on NodeMCU
@@ -60,6 +80,7 @@ unsigned long lastButtonPressWasLongPress = 0;
 // Time
 const long utcOffsetInSeconds = 3600;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
 // Define NTP client to get time
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
@@ -72,9 +93,16 @@ WiFiClientSecure client;
 /* Import: See https://randomnerdtutorials.com/esp32-http-get-post-arduino/#comment-722499*/
 #include <ArduinoJson.h>
 
-String HTTPS_PATH = "/playground/nodemcu-tv-ir-control_turn-on-off.json";
+// Personal host
+// String HTTPS_PATH = "/playground/nodemcu-tv-ir-control_turn-on-off.json";
+// String HTTPS_START = "https://";
+// String CONFIG_HOST = "tobiasnordahl.dk";
+
+// Cloudflare worker -- https://micro.tobiasnordahl.dk/nodemcu-001-tv-ir-control.json // http://micro.tobiasnordahl.dk/nodemcu-001-tv-ir-control.json
+String HTTPS_PATH = "/nodemcu-001-tv-ir-control.json";
 String HTTPS_START = "https://";
-String CONFIG_HOST = "tobiasnordahl.dk";
+String CONFIG_HOST = "micro.tobiasnordahl.dk";
+
 // {"config":{"turnOn":{"hh":7, "mm":45, "ss": 05},"turnOff":{"hh":16, "mm":30, "ss": 05}}}
 
 String CONFIG_URL = String(HTTPS_START) + String(CONFIG_HOST) + String(HTTPS_PATH);
@@ -177,12 +205,15 @@ bool fetch_json_config(void)
             return 1;
           }
 
+          __DOWNLOAD_CONFIG_OK = true;
+
           __C_TURN_ON_HH = int(obj["config"]["turnOn"]["hh"]);
           __C_TURN_ON_MM = int(obj["config"]["turnOn"]["mm"]);
           __C_TURN_ON_SS = int(obj["config"]["turnOn"]["ss"]);
           __C_TURN_OFF_HH = int(obj["config"]["turnOff"]["hh"]);
           __C_TURN_OFF_MM = int(obj["config"]["turnOff"]["mm"]);
           __C_TURN_OFF_SS = int(obj["config"]["turnOff"]["ss"]);
+          __C_ALLOWED_DAYS = obj["config"]["allowedDays"]; // obj["config"]["allowedDays"].as<char*>()
 
           log_i("__C_TURN_ON_HH", __C_TURN_ON_HH);
           log_i("__C_TURN_ON_MM", __C_TURN_ON_MM);
@@ -231,16 +262,32 @@ void controlTvState(boolean turnTvOn)
   if (!turnTvOn)
   {
     __TV_IS_ON = 0;
-    Serial.println("Turning tv off");
+    Serial.println("Turning tv off 1/3");
     blinkESP8266LED(600, 3);
     IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
+    Serial.println("Turning tv off 2/3");
+    blinkESP8266LED(600, 3);
+    IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
+    Serial.println("Turning tv off 3/3");
+    blinkESP8266LED(600, 3);
+    IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
+    createColor.off();
+    createColor.whiteRedDimmed();
   }
   else if (turnTvOn)
   {
     __TV_IS_ON = 1;
-    Serial.println("Turning tv on");
+    Serial.println("Turning tv on 1/3");
     blinkESP8266LED(150, 5);
     IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
+    Serial.println("Turning tv on 2/3");
+    blinkESP8266LED(150, 5);
+    IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
+    Serial.println("Turning tv on 3/3");
+    blinkESP8266LED(150, 5);
+    IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
+    createColor.off();
+    createColor.whiteGreenDimmed();
   }
 }
 
@@ -252,25 +299,51 @@ void checkTvState()
   Serial.print("__TIME_EPOCH " + String(__TIME_EPOCH));
   Serial.println("  __C_TURN_ON_HH : MM : SS " + String(__C_TURN_ON_HH)) + " : " + String(__C_TURN_ON_MM) + " : " + String(__C_TURN_ON_SS);
   Serial.println("  __C_TURN_OFF_HH : MM : SS " + String(__C_TURN_OFF_HH)) + " : " + String(__C_TURN_OFF_MM) + " : " + String(__C_TURN_OFF_SS);
+  Serial.println("  __C_ALLOWED_DAYS " + String(__C_ALLOWED_DAYS));
+  Serial.println("  __THIS_TIME " + String(__THIS_TIME) + "__TV_OFF_SEC" + String(__TV_OFF_SEC));
+  
 
   __TV_ON_SEC = (__C_TURN_ON_HH * 60 * 60) + (__C_TURN_ON_MM * 60) + (__C_TURN_ON_SS);
   __TV_OFF_SEC = (__C_TURN_OFF_HH * 60 * 60) + (__C_TURN_OFF_MM * 60) + (__C_TURN_OFF_SS);
 
-  // Turn tv off
-  if (__THIS_TIME > __TV_OFF_SEC && __TV_IS_ON)
+  // Weekday not in scope, so do nothing
+  if(!(String(__C_ALLOWED_DAYS).indexOf(String(__TIME_WEEKDAY)) != -1)){
+    Serial.println("Weekday not in scope");
+    Serial.print("Weekday: ");
+    Serial.println(daysOfTheWeek[__TIME_WEEKDAY]);
+
+    Serial.print("Allowed days (sun0, mon1, tues2, wed3, thur4, fri5, sat6): ");
+    Serial.println("__C_ALLOWED_DAYS " + String(__C_ALLOWED_DAYS));
+
+
+      if (!__BLUE_DIMMED)
+      {
+        __BLUE_DIMMED = 1;
+        createColor.off();
+        createColor.whiteBlueDimmed();
+      }
+  }
+  // Trigger turn off
+  else if (__THIS_TIME > __TV_OFF_SEC && __TV_IS_ON)
   {
+    __BLUE_DIMMED = 0;
     Serial.println("Turning tv off");
     controlTvState(0);
   }
-  else if (__THIS_TIME > __TV_ON_SEC && __THIS_TIME < __TV_OFF_SEC && !__TV_IS_ON)
+  // Trigger turn on
+  else if (__THIS_TIME > __TV_ON_SEC && __THIS_TIME < __TV_OFF_SEC)
   { // Turn tv on
+    __BLUE_DIMMED = 0;
     Serial.println("Turning tv on");
     controlTvState(1);
   }
+  // Nothing to do right now
   else
   {
     // Should mean that nothing should be done
     Serial.println("All good, nothing to do");
+    Serial.print("Weekday: ");
+    Serial.println(daysOfTheWeek[__TIME_WEEKDAY]);
   }
 }
 
@@ -283,6 +356,7 @@ void checkOneSecInterval()
 // SETUP
 void setup()
 {
+
   // LED on ESP8266 chip (internal LED)
   pinMode(D4, OUTPUT);
 
@@ -292,6 +366,13 @@ void setup()
     delay(50);
 
   Serial.println("Starter op..");
+  createColor.whiteBlue();
+  delay(500);
+  createColor.off();
+  createColor.whiteBlue();
+  delay(500);
+  createColor.off();
+
 
   // Set Current state LED
   __CURRENT_STATE_LED = digitalReadOutputPin(D4);
@@ -340,6 +421,7 @@ void setup()
 
     // if you get here you have connected to the WiFi
     Serial.println("Connected...Wuhu :)");
+    createColor.whiteBlue();
 
     // Blink LED
     blinkESP8266LED(300, 6);
@@ -349,19 +431,45 @@ void setup()
 
     // Download file
     Serial.println("Download begin");
+
+    createColor.whiteRed();
+
     get_json_config();
 
-    if (__C_TURN_ON_HH && __C_TURN_OFF_HH)
+    if (__C_TURN_ON_HH && __C_TURN_OFF_HH && __DOWNLOAD_CONFIG_OK)
     {
       Serial.println("Download OK");
+
+      createColor.off();
+      createColor.whiteBlue();
+      createColor.whiteGreen();
+
+      Serial.println("__C_TURN_ON_HH");
+      Serial.println(__C_TURN_ON_HH);
+      Serial.println("__C_TURN_OFF_HH");
+      Serial.println(__C_TURN_OFF_HH);
+      Serial.println("Download end");
       blinkESP8266LED(200, 6);
+
+      createColor.off();
+      createColor.whiteGreen();
+      checkOneSecInterval();
+    }else{
+      createColor.off();
+      createColor.whiteRed();
+      Serial.println("Download end");
+      Serial.println("Will not continue due to invalid download");
+      blinkESP8266LED(1000, 20);
+
     }
     Serial.println("Download end");
 
-    checkOneSecInterval();
+
   }
   else
   {
+    createColor.off();
+    createColor.whiteRed();
     Serial.println("Configuration portal running");
   }
 }
@@ -446,9 +554,9 @@ void loop()
     {
       Serial.println("!!!3");
       IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_OFF, __IR_REPEATS);
-      delay(1000);
+      delay(2000);
       IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
-      delay(1000);
+      delay(2000);
     }
   }
 
@@ -613,6 +721,10 @@ void loop()
     __TIME_SS = timeClient.getSeconds();
     __TIME_EPOCH = timeClient.getEpochTime();
     __TIME_FORMATTED = timeClient.getFormattedTime();
+    __THIS_TIME = (__TIME_HH * 60 * 60) + (__TIME_MM * 60) + __TIME_SS;
+
+    // Calculate weekday
+    __TIME_WEEKDAY = ( (__TIME_EPOCH / 86400L) + 4 ) % 7; // Januar 1, 1970 was a Thursday, 0 will be Thursday if you use "day % 7". Instead use "(day+4) % 7" if you need sunday to be the first day of the week
 
     // Check every sec
     checkOneSecInterval();
