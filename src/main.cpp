@@ -1,6 +1,12 @@
-#include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
+// See: https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WiFi/examples/BearSSL_CertStore/BearSSL_CertStore.ino
+
+// Wifi Related
+#include <ESP8266WiFi.h>          // Replace with WiFi.h for ESP32
+#include <ESP8266WebServer.h>     // Replace with WebServer.h for ESP32
+#include <AutoConnect.h>
+
+// Other requirements
 #include <NTPClient.h>   // https://github.com/arduino-libraries/NTPClient
-#include <WiFiUdp.h>
 #include <ezButton.h>
 
 // IR Configuration
@@ -10,6 +16,9 @@
 // Prevent Stack crashed for network-requests - See https://github.com/esp8266/Arduino/issues/6811
 #include <StackThunk.h>
 #define _stackSize (6900/4)
+
+// Json
+#include <ArduinoJson.h>
 
 // VARS
 //-- WIFI
@@ -86,21 +95,16 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 
 // Download files
-#include <WiFiClient.h>
-WiFiClientSecure client;
 #include <ESP8266HTTPClient.h>
-#include <WiFiClientSecureBearSSL.h>
+#include <WiFiClient.h>
+
 /* Import: See https://randomnerdtutorials.com/esp32-http-get-post-arduino/#comment-722499*/
 #include <ArduinoJson.h>
 
-// Personal host
-// String HTTPS_PATH = "/playground/nodemcu-tv-ir-control_turn-on-off.json";
-// String HTTPS_START = "https://";
-// String CONFIG_HOST = "tobiasnordahl.dk";
 
 // Cloudflare worker -- https://micro.tobiasnordahl.dk/nodemcu-001-tv-ir-control.json // http://micro.tobiasnordahl.dk/nodemcu-001-tv-ir-control.json
 String HTTPS_PATH = "/nodemcu-001-tv-ir-control.json";
-String HTTPS_START = "https://";
+String HTTPS_START = "http://";
 String CONFIG_HOST = "micro.tobiasnordahl.dk";
 
 // {"config":{"turnOn":{"hh":7, "mm":45, "ss": 05},"turnOff":{"hh":16, "mm":30, "ss": 05}}}
@@ -108,8 +112,18 @@ String CONFIG_HOST = "micro.tobiasnordahl.dk";
 String CONFIG_URL = String(HTTPS_START) + String(CONFIG_HOST) + String(HTTPS_PATH);
 const char *URL_COMPLETE = CONFIG_URL.c_str();
 
-// WIFI - WiFiManager, Local intialization. Once its business is done, there is no need to keep it around
-WiFiManager wm;
+// Wifi Setup
+
+ESP8266WebServer Server;          // Replace with WebServer for ESP32
+AutoConnect      Portal(Server);
+
+
+
+void rootPage() {
+  char content[] = "Hello, world";
+  Server.send(200, "text/plain", content);
+}
+
 
 void log_i(const String &txt, int configInt)
 {
@@ -172,72 +186,67 @@ bool fetch_json_config(void)
 {
   if (WiFi.status() == WL_CONNECTED)
   {
-    String url = CONFIG_URL;
+    String url = CONFIG_URL; 
 
-    std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-    client->setInsecure();
-    HTTPClient https;
+    WiFiClient client;
+    HTTPClient http;
 
-    if (https.begin(*client, CONFIG_URL))
-    { // HTTPS
-      Serial.println("[HTTPS] GET...");
-      int httpCode = https.GET();
 
-      // httpCode will be negative on error
-      if (httpCode > 0)
-      {
-        // HTTP header has been send and Server response header has been handled
-        Serial.printf("[HTTPS] GET... code: %d\n", httpCode);
-        // file found at server?
-        if (httpCode == HTTP_CODE_OK)
-        {
-          String payload = https.getString();
-          Serial.println(String("[HTTPS] Received payload: ") + payload);
+    if (http.begin(client, CONFIG_URL)) {  // HTTP
 
-          DynamicJsonDocument doc(1024);
-          DeserializationError error = deserializeJson(doc, payload);
-          JsonObject obj = doc.as<JsonObject>();
 
-          if (error)
-          {
-            Serial.print("deserializeJson() failed: ");
-            Serial.println(error.c_str());
-            return 1;
+        Serial.print("[HTTP] GET...");
+        // start connection and send HTTP header
+        int httpCode = http.GET();
+
+        // httpCode will be negative on error
+        if (httpCode > 0) {
+          // HTTP header has been send and Server response header has been handled
+          Serial.printf("[HTTP] GET... code: %d", httpCode);
+
+          // file found at server
+          if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+            String payload = http.getString();
+            Serial.println(payload);
+
+            DynamicJsonDocument doc(1024);
+            DeserializationError error = deserializeJson(doc, payload);
+            JsonObject obj = doc.as<JsonObject>();
+
+            if (error)
+            {
+              Serial.print("deserializeJson() failed: ");
+              Serial.println(error.c_str());
+              return 1;
+            }
+
+            __DOWNLOAD_CONFIG_OK = true;
+
+            __C_TURN_ON_HH = int(obj["config"]["turnOn"]["hh"]);
+            __C_TURN_ON_MM = int(obj["config"]["turnOn"]["mm"]);
+            __C_TURN_ON_SS = int(obj["config"]["turnOn"]["ss"]);
+            __C_TURN_OFF_HH = int(obj["config"]["turnOff"]["hh"]);
+            __C_TURN_OFF_MM = int(obj["config"]["turnOff"]["mm"]);
+            __C_TURN_OFF_SS = int(obj["config"]["turnOff"]["ss"]);
+            __C_ALLOWED_DAYS = obj["config"]["allowedDays"]; // obj["config"]["allowedDays"].as<char*>()
+
+            log_i("__C_TURN_ON_HH", __C_TURN_ON_HH);
+            log_i("__C_TURN_ON_MM", __C_TURN_ON_MM);
+            log_i("__C_TURN_ON_SS", __C_TURN_ON_SS);
+            log_i("__C_TURN_OFF_HH", __C_TURN_OFF_HH);
+            log_i("__C_TURN_OFF_MM", __C_TURN_OFF_MM);
+            log_i("__C_TURN_OFF_SS", __C_TURN_OFF_SS);
+
           }
-
-          __DOWNLOAD_CONFIG_OK = true;
-
-          __C_TURN_ON_HH = int(obj["config"]["turnOn"]["hh"]);
-          __C_TURN_ON_MM = int(obj["config"]["turnOn"]["mm"]);
-          __C_TURN_ON_SS = int(obj["config"]["turnOn"]["ss"]);
-          __C_TURN_OFF_HH = int(obj["config"]["turnOff"]["hh"]);
-          __C_TURN_OFF_MM = int(obj["config"]["turnOff"]["mm"]);
-          __C_TURN_OFF_SS = int(obj["config"]["turnOff"]["ss"]);
-          __C_ALLOWED_DAYS = obj["config"]["allowedDays"]; // obj["config"]["allowedDays"].as<char*>()
-
-          log_i("__C_TURN_ON_HH", __C_TURN_ON_HH);
-          log_i("__C_TURN_ON_MM", __C_TURN_ON_MM);
-          log_i("__C_TURN_ON_SS", __C_TURN_ON_SS);
-          log_i("__C_TURN_OFF_HH", __C_TURN_OFF_HH);
-          log_i("__C_TURN_OFF_MM", __C_TURN_OFF_MM);
-          log_i("__C_TURN_OFF_SS", __C_TURN_OFF_SS);
-
-          return 0;
+        } else {
+          Serial.printf("[HTTP] GET... failed, error: %s", http.errorToString(httpCode).c_str());
         }
-      }
-      else
-      {
-        Serial.printf("[HTTPS] GET... failed, error: %s\n\r", https.errorToString(httpCode).c_str());
 
-        return 0;
+        http.end();
+      } else {
+        Serial.printf("[HTTP} Unable to connect");
       }
 
-      https.end();
-    }
-    else
-    {
-      Serial.printf("[HTTPS] Unable to connect\n\r");
-    }
 
     return 0;
   }
@@ -353,6 +362,8 @@ void checkOneSecInterval()
   checkTvState();
 }
 
+
+
 // SETUP
 void setup()
 {
@@ -392,31 +403,16 @@ void setup()
   // put your setup code here, to run once:
   Serial.begin(115200);
 
-  // WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
-  // it is a good practice to make sure your code sets wifi mode how you want it.
+ 
 
-  // reset settings - wipe stored credentials for testing
-  // these are stored by the esp library
-  // wm.resetSettings();
 
-  // Automatically connect using saved credentials,
-  // if connection fails, it starts an access point with the specified name ( "AutoConnectAP"),
-  // if empty will auto generate SSID, if password is blank it will be anonymous AP (wm.autoConnect())
-  // then goes into a blocking loop awaiting configuration and will return success result
 
-  bool res;
-  // res = wm.autoConnect(); // auto generated AP name from chipid
-  // res = wm.autoConnect("AutoConnectAP"); // anonymous ap
-  res = wm.autoConnect("AutoConnectAP", "standupnow"); // password protected ap
+  Server.on("/", rootPage);
+  if (Portal.begin()) {
+    Serial.println("WiFi connected: " + WiFi.localIP().toString());
 
-  if (!res)
-  {
-    Serial.println("Failed to connect");
-    // ESP.restart();
-  }
 
-  if (res)
-  {
+
     __WIFI_CONNECTED = true;
 
     // if you get here you have connected to the WiFi
@@ -428,6 +424,7 @@ void setup()
 
     Serial.println("Calling timeClient");
     timeClient.begin();
+    timeClient.update();
 
     // Download file
     Serial.println("Download begin");
@@ -448,30 +445,36 @@ void setup()
       Serial.println(__C_TURN_ON_HH);
       Serial.println("__C_TURN_OFF_HH");
       Serial.println(__C_TURN_OFF_HH);
-      Serial.println("Download end");
+      Serial.println("Download result printed");
       blinkESP8266LED(200, 6);
 
       createColor.off();
       createColor.whiteGreen();
       checkOneSecInterval();
     }else{
+
+      Serial.println(WiFi.dnsIP());
+      Serial.println(WiFi.dnsIP(1));
       createColor.off();
       createColor.whiteRed();
       Serial.println("Download end");
       Serial.println("Will not continue due to invalid download");
-      blinkESP8266LED(1000, 20);
+      blinkESP8266LED(1000, 6);
 
     }
     Serial.println("Download end");
 
 
-  }
-  else
-  {
+
+
+  }else{
+    Serial.println("Failed to connect");
     createColor.off();
     createColor.whiteRed();
-    Serial.println("Configuration portal running");
   }
+
+  
+
 }
 
 // Delays
@@ -503,8 +506,13 @@ boolean delay_without_delaying(unsigned long &since, unsigned long time)
 }
 
 String command;
+
+// See: https://hieromon.github.io/AutoConnect/howtoembed.html
 void loop()
 {
+
+  Portal.handleClient();
+  
 
   // Read serial
   if (Serial.available())
@@ -558,16 +566,6 @@ void loop()
       IrSender.sendSamsung(__IR_ADDRESS, __IR_COMMAND_TURN_ON, __IR_REPEATS);
       delay(2000);
     }
-  }
-
-  if (wm.getConfigPortalActive())
-  {
-    Serial.println("No wifi1....");
-  }
-
-  if (wm.getWebPortalActive())
-  {
-    Serial.println("No wifi2....");
   }
 
   // Button counts
@@ -738,3 +736,34 @@ void loop()
     // Nothing right now - Serial.print("C");
   }
 }
+
+
+
+
+// void oldSetup() {
+//   delay(1000);
+//   Serial.begin(115200);
+//   Serial.println();
+
+//   Server.on("/", rootPage);
+//   if (Portal.begin()) {
+//     Serial.println("WiFi connected: " + WiFi.localIP().toString());
+
+//     Serial.println("Calling timeClient");
+//     timeClient.begin();
+//     timeClient.update();
+//     __TIME_HH = timeClient.getHours();
+//     __TIME_MM = timeClient.getMinutes();
+//     __TIME_SS = timeClient.getSeconds();
+//     __TIME_EPOCH = timeClient.getEpochTime();
+//     __TIME_FORMATTED = timeClient.getFormattedTime();
+//     __THIS_TIME = (__TIME_HH * 60 * 60) + (__TIME_MM * 60) + __TIME_SS;
+//     __TIME_WEEKDAY = ( (__TIME_EPOCH / 86400L) + 4 ) % 7; // Januar 1, 1970 was a Thursday, 0 will be Thursday if you use "day % 7". Instead use "(day+4) % 7" if you need sunday to be the first day of the week
+//     Serial.println(String(__TIME_WEEKDAY));
+
+//   }
+// }
+
+// void loop() {
+//     Portal.handleClient();
+// }
